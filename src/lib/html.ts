@@ -130,7 +130,9 @@ function replaceAttributeValues(body: HTMLElement, values: Prop[]) {
 
 		for (const attr of node.attributes) {
 			const search = 'framework-insert-attr=';
-			const start = attr.value.indexOf(search) + search.length;
+			const startIndex = attr.value.indexOf(search);
+			if (startIndex === -1) continue;
+			const start = startIndex + search.length;
 			const sliced = attr.value.slice(start);
 			const end = sliced.indexOf('$');
 			const number = Number(sliced.slice(0, end));
