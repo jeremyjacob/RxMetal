@@ -1,168 +1,190 @@
-import { Observable, Subject, isObservable } from 'rxjs';
-import { walk } from './utils';
+import { Observable, Subject, isObservable } from "rxjs";
+import { walk } from "./utils";
 
 export type BasicProp =
-	| string
-	| boolean
-	| number
-	| ChildNode
-	| Subject<Event>
-	| null
-	| undefined;
+    | string // Static string
+    | boolean // Static boolean
+    | number // Static number
+    | ChildNode // Node binding
+    | Subject<Event> // Event binding with on:
+    | Subject<string> // Attribute binding with bind:
+    | null // Nothing rendered
+    | undefined; // Nothing rendered
 export type Prop = BasicProp | Observable<BasicProp>;
 
 export function html<T = ChildNode>(
-	strings: TemplateStringsArray,
-	...values: Prop[]
+    strings: TemplateStringsArray,
+    ...values: Prop[]
 ): T {
-	const result = constructHTMLResult(strings, values);
-	const parser = new DOMParser();
-	const doc = parser.parseFromString(result, 'text/html');
+    const result = constructHTMLResult(strings, values);
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(result, "text/html");
 
-	const insertEls = doc.querySelectorAll('framework-insert-element');
-	for (let i = 0; i < insertEls.length; i++) {
-		const id = insertEls[i].getAttribute('data-id');
-		if (id === null) {
-			throw new Error(
-				'Missing `data-id` attribute on <framework-insert-element>'
-			);
-		}
-		replaceDOMElement(insertEls[i], values[Number(id)]);
-	}
+    const insertEls = doc.querySelectorAll("framework-insert-element");
+    for (let i = 0; i < insertEls.length; i++) {
+        const id = insertEls[i].getAttribute("data-id");
+        if (id === null) {
+            throw new Error(
+                "Missing `data-id` attribute on <framework-insert-element>",
+            );
+        }
+        replaceDOMElement(insertEls[i], values[Number(id)]);
+    }
 
-	const bodyChild: Node | undefined = doc.body.childNodes[0];
-	const headChild: Node | undefined = doc.head.childNodes[0];
-	const child = bodyChild ?? headChild;
+    const bodyChild: Node | undefined = doc.body.childNodes[0];
+    const headChild: Node | undefined = doc.head.childNodes[0];
+    const child = bodyChild ?? headChild;
 
-	if (doc.body.childNodes.length > 1) {
-		console.warn(
-			`html template may only have a single root node, found ${doc.body.childNodes.length} nodes: ${doc.body.innerHTML}`
-		);
-	} else if (!child) {
-		throw new Error(`html template must have a root node`);
-	}
+    if (doc.body.childNodes.length > 1) {
+        console.warn(
+            `html template may only have a single root node, found ${doc.body.childNodes.length} nodes: ${doc.body.innerHTML}`,
+        );
+    } else if (!child) {
+        throw new Error(`html template must have a root node`);
+    }
 
-	replaceAttributeValues(doc.body, values);
+    replaceAttributeValues(doc.body, values);
 
-	if (headChild && bodyChild) {
-		console.warn(
-			'html template contains both head and body elements, ignoring head'
-		);
-	}
+    if (headChild && bodyChild) {
+        console.warn(
+            "html template contains both head and body elements, ignoring head",
+        );
+    }
 
-	return child as T;
+    return child as T;
 }
 
 function constructHTMLResult(
-	templateStringsArray: TemplateStringsArray,
-	values: Prop[]
+    templateStringsArray: TemplateStringsArray,
+    values: Prop[],
 ) {
-	const strings = templateStringsArray.raw;
+    const strings = templateStringsArray.raw;
 
-	let result = '';
-	let inOpeningTag = false;
+    let result = "";
+    let inOpeningTag = false;
 
-	for (let i = 0; i < strings.length; i++) {
-		const string = strings[i];
-		for (let i = 0; i < string?.length; i++) {
-			if (string[i] == '<' && string[i + 1] != '/') inOpeningTag = true;
-			else if (string[i] == '>') inOpeningTag = false;
-		}
+    for (let i = 0; i < strings.length; i++) {
+        const string = strings[i];
+        for (let i = 0; i < string?.length; i++) {
+            if (string[i] === "<" && string[i + 1] !== "/") inOpeningTag = true;
+            else if (string[i] === ">") inOpeningTag = false;
+        }
 
-		result += templateStringsArray.raw[i];
-		if (inOpeningTag) {
-			result += `framework-insert-attr=${i}$`;
-		} else {
-			if (i < values.length) {
-				result += `<framework-insert-element data-id="${i}"></framework-insert-element>`;
-			}
-		}
-	}
-	return result.trim();
+        result += templateStringsArray.raw[i];
+        if (inOpeningTag) {
+            result += `framework-insert-attr=${i}$`;
+        } else {
+            if (i < values.length) {
+                result += `<framework-insert-element data-id="${i}"></framework-insert-element>`;
+            }
+        }
+    }
+    return result.trim();
 }
 
 function replaceDOMElement(element: Element, prop: Prop) {
-	if (prop instanceof Node) {
-		element.replaceWith(prop);
-	} else if (prop == null) {
-		element.replaceWith(document.createComment(''));
-	} else if (
-		typeof prop === 'string' ||
-		typeof prop === 'number' ||
-		typeof prop === 'boolean'
-	) {
-		element.replaceWith(document.createTextNode(prop.toString()));
-	} else if (isObservable(prop)) {
-		console.log(prop);
-		handleObservableProp(element, prop as Observable<BasicProp>);
-	}
+    if (prop instanceof Node) {
+        element.replaceWith(prop);
+    } else if (prop == null) {
+        element.replaceWith(document.createComment(""));
+    } else if (
+        typeof prop === "string" ||
+        typeof prop === "number" ||
+        typeof prop === "boolean"
+    ) {
+        element.replaceWith(document.createTextNode(prop.toString()));
+    } else if (isObservable(prop)) {
+        console.log(prop);
+        handleObservableProp(element, prop as Observable<BasicProp>);
+    }
 }
 
 function handleObservableProp(element: Element, prop$: Observable<BasicProp>) {
-	let currentNode: ChildNode | Comment = document.createTextNode('');
-	prop$.subscribe((value) => {
-		currentNode = replaceNodeValue(currentNode, value);
-	});
-	// TODO: unsubscribe
-	element.replaceWith(currentNode);
+    let currentNode: ChildNode | Comment = document.createTextNode("");
+    prop$.subscribe((value) => {
+        currentNode = replaceNodeValue(currentNode, value);
+    });
+    // TODO: unsubscribe
+    element.replaceWith(currentNode);
 }
 
 function replaceNodeValue(
-	node: ChildNode | Comment,
-	value: BasicProp
+    node: ChildNode | Comment,
+    value: BasicProp,
 ): ChildNode | Comment {
-	if (value instanceof Node) {
-		node.replaceWith(value);
-		return value;
-	} else if (value == null) {
-		const comment = document.createComment('');
-		node.replaceWith(comment);
-		return comment;
-	} else {
-		node.textContent = value.toString();
-		return node;
-	}
+    if (value instanceof Node) {
+        node.replaceWith(value);
+        return value;
+    } else if (value == null) {
+        const comment = document.createComment("");
+        node.replaceWith(comment);
+        return comment;
+    } else {
+        node.textContent = value.toString();
+        return node;
+    }
 }
 
 function replaceAttributeValues(body: HTMLElement, values: Prop[]) {
-	walk(body, (node) => {
-		if (!(node instanceof HTMLElement)) return;
+    walk(body, (node) => {
+        if (!(node instanceof HTMLElement)) return;
 
-		for (const attr of node.attributes) {
-			const search = 'framework-insert-attr=';
-			const startIndex = attr.value.indexOf(search);
-			if (startIndex === -1) continue;
-			const start = startIndex + search.length;
-			const sliced = attr.value.slice(start);
-			const end = sliced.indexOf('$');
-			const number = Number(sliced.slice(0, end));
-			const restBefore = attr.value.slice(0, start - search.length);
-			const restAfter = sliced.slice(end + 1);
+        for (const attr of node.attributes) {
+            const search = "framework-insert-attr=";
+            const startIndex = attr.value.indexOf(search);
+            if (startIndex === -1) continue;
+            const start = startIndex + search.length;
+            const sliced = attr.value.slice(start);
+            const end = sliced.indexOf("$");
+            const number = Number(sliced.slice(0, end));
+            const restBefore = attr.value.slice(0, start - search.length);
+            const restAfter = sliced.slice(end + 1);
 
-			if (isNaN(number)) {
-				throw new Error(
-					`Missing attribute value for ${attr.name} on ${node.outerHTML}`
-				);
-			}
+            if (isNaN(number)) {
+                throw new Error(
+                    `Missing attribute value for ${attr.name} on ${node.outerHTML}`,
+                );
+            }
 
-			const value = values[number];
-			if (!isObservable(value)) continue;
+            const value = values[number];
+            if (!isObservable(value)) continue;
 
-			if ('next' in value) {
-				// Event binding
-				if (attr.name.startsWith('on:')) {
-					const event = attr.name.slice(3);
-					node.addEventListener(event, (e) => value.next(e));
-					node.removeAttribute(attr.name);
-				}
-			} else {
-				// Attribute binding
-				value.subscribe((value) => {
-					const newValue =
-						value != null ? restBefore + value + restAfter : '';
-					node.setAttribute(attr.name, newValue);
-				});
-			}
-		}
-	});
+            if ("next" in value) {
+                // Event binding
+                if (attr.name.startsWith("on:")) {
+                    const valueE = value as Subject<Event>;
+                    const event = attr.name.slice("on:".length);
+                    node.addEventListener(event, (e) => valueE.next(e));
+                    node.removeAttribute(attr.name);
+                }
+                // Property binding
+                if (attr.name.startsWith("bind:")) {
+                    const valueS = value as Subject<string>;
+                    const prop = attr.name.slice("bind:".length);
+                    if (
+                        prop === "value" &&
+                        (node instanceof HTMLInputElement ||
+                            node instanceof HTMLTextAreaElement)
+                    ) {
+                        node.addEventListener("input", (e) => {
+                            const target = e.target as HTMLInputElement;
+                            valueS.next(target.value);
+                        });
+                        // TODO: unsubscribe
+                        valueS.subscribe((value) => {
+                            node.value = value;
+                        });
+                        // TODO: unsubscribe
+                    }
+                }
+            } else {
+                // Attribute binding
+                value.subscribe((value) => {
+                    const newValue =
+                        value != null ? restBefore + value + restAfter : "";
+                    node.setAttribute(attr.name, newValue);
+                });
+            }
+        }
+    });
 }
