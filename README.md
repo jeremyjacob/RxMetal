@@ -1,4 +1,7 @@
+![RxMetal Frame 1](https://github.com/jeremyjacob/RxMetal/assets/44799944/debba470-8b2c-4a58-9023-64b4dc974930)
 ## What is RxMetal
+
+
 
 RxMetal is an efficent, minimal library for creating reactive HTML components using RxJS. RxMetal works without a virtual DOM, instead keepign reference to and updating elements and text nodes directly.
 
