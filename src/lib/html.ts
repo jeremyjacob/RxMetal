@@ -6,6 +6,7 @@ export type BasicProp =
     | boolean // Static boolean
     | number // Static number
     | ChildNode // Node binding
+    | ChildNode[] // Node bindings
     | Subject<Event> // Event binding with on:
     | Subject<string> // Attribute binding with bind:
     | null // Nothing rendered
@@ -43,7 +44,10 @@ export function html<T = ChildNode>(
         throw new Error(`html template must have a root node`);
     }
 
-    replaceAttributeValues(doc.body, values);
+    walk(doc.body, (node) => {
+        if (!(node instanceof HTMLElement)) return;
+        replaceAttributeValues(node, values);
+    });
 
     if (headChild && bodyChild) {
         console.warn(
@@ -85,6 +89,8 @@ function constructHTMLResult(
 function replaceDOMElement(element: Element, prop: Prop) {
     if (prop instanceof Node) {
         element.replaceWith(prop);
+    } else if (Array.isArray(prop)) {
+        element.replaceWith(...prop);
     } else if (prop == null) {
         element.replaceWith(document.createComment(""));
     } else if (
@@ -94,97 +100,114 @@ function replaceDOMElement(element: Element, prop: Prop) {
     ) {
         element.replaceWith(document.createTextNode(prop.toString()));
     } else if (isObservable(prop)) {
-        console.log(prop);
         handleObservableProp(element, prop as Observable<BasicProp>);
     }
 }
 
 function handleObservableProp(element: Element, prop$: Observable<BasicProp>) {
-    let currentNode: ChildNode | Comment = document.createTextNode("");
+    let currentNodes: Array<ChildNode | Comment> = [
+        document.createTextNode(""),
+    ];
     prop$.subscribe((value) => {
-        currentNode = replaceNodeValue(currentNode, value);
+        currentNodes = replaceNodeValue(currentNodes, value);
     });
     // TODO: unsubscribe
-    element.replaceWith(currentNode);
+    element.replaceWith(...currentNodes);
 }
 
 function replaceNodeValue(
-    node: ChildNode | Comment,
-    value: BasicProp,
-): ChildNode | Comment {
-    if (value instanceof Node) {
-        node.replaceWith(value);
-        return value;
-    } else if (value == null) {
+    node: Array<ChildNode | Comment>,
+    prop: BasicProp,
+): Array<ChildNode | Comment> {
+    if (prop instanceof Node) {
+        node[0].replaceWith(prop);
+        node.forEach((n, i) => i !== 0 && n.remove());
+        return [prop];
+    } else if (Array.isArray(prop)) {
+        node[0].replaceWith(...prop);
+        node.forEach((n, i) => i !== 0 && n.remove());
+        // TODO: better algorithm
+        return prop;
+    } else if (prop == null) {
         const comment = document.createComment("");
-        node.replaceWith(comment);
-        return comment;
+        node[0].replaceWith(comment);
+        node.forEach((n, i) => i !== 0 && n.remove());
+        return [comment];
     } else {
-        node.textContent = value.toString();
-        return node;
+        const textNode = document.createTextNode(prop.toString());
+        node[0].replaceWith(textNode);
+        node.forEach((n, i) => i !== 0 && n.remove());
+        return [textNode];
     }
 }
 
-function replaceAttributeValues(body: HTMLElement, values: Prop[]) {
-    walk(body, (node) => {
-        if (!(node instanceof HTMLElement)) return;
+function replaceAttributeValues(element: HTMLElement, values: Prop[]) {
+    for (const attr of element.attributes) {
+        const search = "framework-insert-attr=";
+        const startIndex = attr.value.indexOf(search);
+        if (startIndex === -1) continue;
+        const start = startIndex + search.length;
+        const sliced = attr.value.slice(start);
+        const end = sliced.indexOf("$");
+        const valueIndex = Number(sliced.slice(0, end));
+        const restBefore = attr.value.slice(0, start - search.length);
+        const restAfter = sliced.slice(end + 1);
 
-        for (const attr of node.attributes) {
-            const search = "framework-insert-attr=";
-            const startIndex = attr.value.indexOf(search);
-            if (startIndex === -1) continue;
-            const start = startIndex + search.length;
-            const sliced = attr.value.slice(start);
-            const end = sliced.indexOf("$");
-            const number = Number(sliced.slice(0, end));
-            const restBefore = attr.value.slice(0, start - search.length);
-            const restAfter = sliced.slice(end + 1);
-
-            if (isNaN(number)) {
-                throw new Error(
-                    `Missing attribute value for ${attr.name} on ${node.outerHTML}`,
-                );
-            }
-
-            const value = values[number];
-            if (!isObservable(value)) continue;
-
-            if ("next" in value) {
-                // Event binding
-                if (attr.name.startsWith("on:")) {
-                    const valueE = value as Subject<Event>;
-                    const event = attr.name.slice("on:".length);
-                    node.addEventListener(event, (e) => valueE.next(e));
-                    node.removeAttribute(attr.name);
-                }
-                // Property binding
-                if (attr.name.startsWith("bind:")) {
-                    const valueS = value as Subject<string>;
-                    const prop = attr.name.slice("bind:".length);
-                    if (
-                        prop === "value" &&
-                        (node instanceof HTMLInputElement ||
-                            node instanceof HTMLTextAreaElement)
-                    ) {
-                        node.addEventListener("input", (e) => {
-                            const target = e.target as HTMLInputElement;
-                            valueS.next(target.value);
-                        });
-                        // TODO: unsubscribe
-                        valueS.subscribe((value) => {
-                            node.value = value;
-                        });
-                        // TODO: unsubscribe
-                    }
-                }
-            } else {
-                // Attribute binding
-                value.subscribe((value) => {
-                    const newValue =
-                        value != null ? restBefore + value + restAfter : "";
-                    node.setAttribute(attr.name, newValue);
-                });
-            }
+        if (isNaN(valueIndex)) {
+            throw new Error(
+                `Missing attribute value for ${attr.name} on ${element.outerHTML}`,
+            );
         }
-    });
+
+        const value = values[valueIndex];
+
+        if (!isObservable(value)) {
+            if (value != null) {
+                element.setAttribute(attr.name, value.toString());
+            }
+            continue;
+        }
+
+        if ("next" in value) {
+            // Event binding
+            if (attr.name.startsWith("on:")) {
+                bindEvent(element, attr, value as Subject<Event>);
+            }
+            // Property binding
+            else if (attr.name.startsWith("bind:")) {
+                bindProperty(element, attr, value as Subject<string>);
+            }
+        } else {
+            // Attribute binding
+            value.subscribe((value) => {
+                const newValue =
+                    value != null ? restBefore + value + restAfter : "";
+                element.setAttribute(attr.name, newValue);
+            });
+        }
+    }
+}
+
+function bindEvent(el: HTMLElement, attr: Attr, value: Subject<Event>) {
+    const event = attr.name.slice("on:".length);
+    el.addEventListener(event, (e) => value.next(e));
+    el.removeAttribute(attr.name);
+}
+
+function bindProperty(el: HTMLElement, attr: Attr, value: Subject<string>) {
+    const prop = attr.name.slice("bind:".length);
+    if (
+        prop === "value" &&
+        (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+    ) {
+        el.addEventListener("input", (e) => {
+            const target = e.target as HTMLInputElement;
+            value.next(target.value);
+        });
+        // TODO: unsubscribe
+        value.subscribe((value) => {
+            el.value = value;
+        });
+        // TODO: unsubscribe
+    }
 }
