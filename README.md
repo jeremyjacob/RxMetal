@@ -1,3 +1,5 @@
+![RxMetal Frame 1](https://github.com/jeremyjacob/RxMetal/assets/44799944/debba470-8b2c-4a58-9023-64b4dc974930)
+
 ## What is RxMetal
 
 RxMetal is an efficent, minimal library for creating reactive HTML components using RxJS. RxMetal works without a virtual DOM, instead keepign reference to and updating elements and text nodes directly.
@@ -12,13 +14,15 @@ RxMetal is an efficent, minimal library for creating reactive HTML components us
 import { html } from "rxmetal";
 import { scan, fromEvent } from "rxjs";
 
-const Button = html`<button>Increment</button>`;
-fromEvent(Button, "click").pipe(scan((count) => count + 1, 0));
+const Counter = () => {
+    const Button = html`<button>Increment</button>`;
+    fromEvent(Button, "click").pipe(scan((count) => count + 1, 0));
 
-html`<div>
-    ${Button}
-    <p>Count: ${count$}</p>
-</div>`;
+    return html`<div>
+        ${Button}
+        <p>Count: ${count$}</p>
+    </div>`;
+};
 ```
 
 Events listeners can also be registered using the `on:` directive:
@@ -26,13 +30,15 @@ Events listeners can also be registered using the `on:` directive:
 ```ts
 import { Subject } from "rxjs";
 
-const click$ = new Subject<Event>();
-const count$ = click$.pipe(scan((count) => count + 1, 0));
+const Counter = () => {
+    const click$ = new Subject<Event>();
+    const count$ = click$.pipe(scan((count) => count + 1, 0));
 
-html`<div>
-    <button on:click=${click$}>Increment</button>
-    <p>Count: ${count$}</p>
-</div>`;
+    return html`<div>
+        <button on:click=${click$}>Increment</button>
+        <p>Count: ${count$}</p>
+    </div>`;
+};
 ```
 
 # Scoped styling
@@ -62,29 +68,7 @@ const ShadowStyling = () => {
 RxMetal is (not yet) available on npm:
 
 ```bash
-pnpm i rxmetal
+bun run index.ts
 ```
 
-# Browser
-
-RxMetal can be used in the browser as an ES Module without a build step:
-
-```js
-import { RxMetal } from "https://unpkg.com/rxmetal?module";
-```
-
-One can optionally use an import map to alias the package name:
-
-```html
-<script type="importmap">
-    {
-        "imports": {
-            "rxmetal": "https://unpkg.com/rxmetal?module"
-        }
-    }
-</script>
-```
-
-```js
-import { RxMetal } from "rxmetal";
-```
+This project was created using `bun init` in bun v1.0.0. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
